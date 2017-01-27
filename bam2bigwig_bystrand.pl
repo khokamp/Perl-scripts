@@ -28,9 +28,11 @@ my $ref_size = '';
 my $region = '';
 my $do_not_overwrite = '';
 my $help = '';
+my $flip_strand = '';
 
 &GetOptions(
     'help' => \$help,
+    'flip_strand' => \$flip_strand,
     'do_not_overwrite' => \$do_not_overwrite,
     'region=s' => \$region,
     'ref_size=i' => \$ref_size,
@@ -260,8 +262,14 @@ foreach my $file (@ARGV) {
 	    my $strand = $flag;
 	    if ($strand & 16 ) {
 		$strand = '-';
+		if ($flip_strand) {
+		    $strand = '+';
+		}
 	    } else {
 		$strand = '+';
+		if ($flip_strand) {
+		    $strand = '-';
+		}
 	    }
 
 	    if ($flag & 128) {
@@ -270,8 +278,14 @@ foreach my $file (@ARGV) {
 		unless ($no_flip) {
 		    if ($strand eq '-') {
 			$strand = '+';
+			if ($flip_strand) {
+			    $strand = '-';
+			}
 		    } else {
 			$strand = '-';
+			if ($flip_strand) {
+			    $strand = '+';
+			}
 		    }
 		}
 	    }
