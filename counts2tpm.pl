@@ -18,7 +18,7 @@ one or more columns with read counts for each library
 
 OPTIONS:
 -method           method to apply (default 'TPM')
--annotation_file  file with geneID and annootation info
+-annotation_file  file with geneID and annotation info
 -gene_length_file file with geneID and transcript length
 -rounding_ratio   number of digits after decimal point for ratios
 -rounding_abs     number of digits after decimal point for non-ratios
@@ -38,8 +38,9 @@ my $help = '';
 my $skip = '';
 my $length_in_data_file = '';
 my $replicates = '';
-
+my $featurecounts = '';
 &GetOptions(
+    'featurecounts' => \$featurecounts,
     'read_length=i' => \$read_length,
     'method=s' => \$method,
     'skip=s' => \$skip,
@@ -57,17 +58,30 @@ if ($help) {
     exit;
 }
 
+if ($featurecounts) {
+    # input file is result from featureCounts program
+    $length_in_data_file = 1;
+}   
+ 
 my %skip_lib_num = ();
 foreach (split /,/, $skip) { #/) {
     $skip_lib_num{$_}++;
 }
 
-my @methods = ('raw', 'RPKM', 'TPM', 'TPM_Wagner');
+my @methods = ('raw', 'CPM', 'RPKM', 'TPM', 'TPM_Wagner');
+my %methods = ();
+foreach (@methods) {
+    $methods{$_}++;
+}
+unless (defined $methods{$method}) {
+    die "Method '$method' not known - please chose one of the following: ".(join ', ', @methods)."\n";
+}
+
 if ($method eq 'all') {
     $method = join ',', (@methods);
 }
 
-if ($method =~ /P/) {
+if ($method =~ /^[TR]/) {
     unless ($gene_length_file) {
 	die "Gene length file needed!\n" unless ($length_in_data_file);
     }
@@ -96,6 +110,10 @@ if ($annotation_file) {
 	}
     }
     close IN;
+} else {
+    if ($featurecounts) {
+	@ann = ('chr', 'start', 'end', 'strand', 'len');
+    }
 }
 
 # read in gene lengths (required for TPM and RPKM)
@@ -112,6 +130,9 @@ if ($gene_length_file or $length_in_data_file) {
 	chomp;
 	s/\cM//;
 	my ($gene, $len, @rest) = split /\t/, $_;
+	if ($featurecounts) {
+	    $len = $rest[3];
+	}
 	$lengths{$gene} = $len;
     }
     close IN;
@@ -119,6 +140,9 @@ if ($gene_length_file or $length_in_data_file) {
 
 # read in main data file with read counts per gene:
 my $header = <>;
+if ($featurecounts) {
+    $header = <> if ($header =~ /^# Program:featureCounts/);
+}
 chomp $header;
 $header =~ s/\cM//;
 my %headers = &get_headers($header);
@@ -127,6 +151,12 @@ my @all_libs = split /\t/, $header;
 # first column contains gene IDs
 shift @all_libs;
 if ($length_in_data_file) {
+    shift @all_libs;
+}
+if ($featurecounts) {
+    shift @all_libs;
+    shift @all_libs;
+    shift @all_libs;
     shift @all_libs;
 }
 
@@ -141,6 +171,16 @@ while (<>) {
     my @h = split /\t/, $_;
     my $id = $h[0];
     $id =~ s/\"//g;
+
+    if ($featurecounts) {
+	$ann{$id} = join "\t", @h[1..5];
+#	my $chr = shift @h;
+#	my $start = shift @h;
+#	my $end = shift @h;
+#	my $strand = shift @h;
+#	my $len = shift @h;
+#	$ann{$id} = join "\t", ($chr, $start, $end, $strand, $len);
+    }
 
     foreach my $lib (sort @all_libs) {
 	unless (defined $headers{$lib}) {
@@ -231,7 +271,7 @@ if (defined $in{'TPM'}) {
 
 # print output:
 # 1. gene, annotation and length
-# 2. all raw and derived values (rpkm, tpm)
+# 2. all raw and derived values (cpm, rpkm, tpm)
 # 3. the ratios for each method
 my @header = ('gene', @ann);
 if ($gene_length_file
@@ -324,7 +364,22 @@ foreach my $gene (sort keys %{$in{'raw'}}) {
 sub normalise {
     my $method = shift;
     
-    if ($method eq 'RPKM') {
+    if ($method eq 'CPM') {
+	foreach my $gene (sort keys %{$in{'raw'}}) {
+	    next if (defined $skip{$gene});
+	    foreach my $lib (@all_libs) {
+		next if (defined $skip_lib{$lib});
+		my $val = $in{'raw'}{$gene}{$lib};
+		my $derived = $val / ($raw_lib_size{$lib}/1000000);
+		if ($rounding_abs) {
+		    $derived = sprintf "%.${rounding_abs}f", $derived;
+		    $derived =~ s/\.0+$//;
+		}
+		$in{$method}{$gene}{$lib} = $derived;
+	    }
+	}
+
+    } elsif ($method eq 'RPKM') {
 	foreach my $gene (sort keys %{$in{'raw'}}) {
 	    next if (defined $skip{$gene});
 	    unless (defined $lengths{$gene}) {
